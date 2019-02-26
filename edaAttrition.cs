@@ -5,6 +5,7 @@ using Microsoft.ML.Data;
 using Microsoft.Data.DataView;
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Learners;
+using Microsoft.ML.Transforms.Categorical;
 
 namespace edaAttrition
 {
@@ -80,49 +81,25 @@ namespace edaAttrition
                 .ToArray();
 
             var split = ml.BinaryClassification.TrainTestSplit(attritionData, testFraction: 0.2);
+            var trainData = split.trainSet;
+            var testData = split.testSet;
 
-            var pipeline = ml.Transforms.Concatenate("Text", textNames)
-                    .Append(ml.Transforms.Text.FeaturizeText("Features", "Text"))
-                    .Append(ml.Transforms.Normalize("Features"))
-                    .Append(ml.BinaryClassification.Trainers.LogisticRegression(
+            var transPipeline = ml.Transforms.Concatenate("CategoricalFeatures", textNames)
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("CategoricalOneHot", "CategoricalFeatures"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("CategoricalBag", "CategoricalFeatures", OneHotEncodingTransformer.OutputKind.Bag));
+
+            // First Transform data to be categorized
+            var categorizedData = transPipeline.Fit(trainData).Transform(trainData);
+
+            // Regression Analysis Pipeline
+            var fullLearningPipeline = transPipeline
+                .Append(ml.Transforms.Concatenate("NumericalFeatures", numericNames))
+                .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "CategoricalBag"))
+                .Append(ml.Transforms.Normalize("Features"))
+                .Append(ml.BinaryClassification.Trainers.LogisticRegression(
                         labelColumn: labelColumn, featureColumn: "Features"));
 
-
-            /*
-            var pipeline = ml.Transforms.Concatenate("Text", textNames)
-                    .Append(ml.Transforms.Text.FeaturizeText("TextFeatures", "Text"))
-                    .Append(ml.Transforms.Concatenate("Features", "TextFeatures"))
-                    .Append(ml.Transforms.Concatenate("Features", numericNames))
-                    .Append(ml.Transforms.Normalize("Features"))
-                    .Append(ml.BinaryClassification.Trainers.LogisticRegression(
-                        labelColumn: labelColumn, featureColumn: "Features"));
-
-
-            var pipeline = ml.Transforms.Concatenate("Features", numericNames)
-                    .Append(ml.Transforms.Normalize("Features"))
-                    .Append(ml.BinaryClassification.Trainers.LogisticRegression(
-                        labelColumn: labelColumn, featureColumn: "Features"));
-            */
-
-            /*
-            var pipeline = ml.Transforms.Concatenate("Text", "business-travel", "department", "education-field",
-                    "gender", "job-role", "marital-status", "over18", "overtime")
-                .Append(ml.Transforms.Text.FeaturizeText("TextFeatures", "Text"))
-                .Append(ml.Transforms.Concatenate("Features", "TextFeatures", "age", "daily-rate",
-                    "distance-from-home", "education", "employee-count", "employee-number",
-                    "employee-satisfaction", "hourly-rate", "job-involvement", "job-level", "job-satisfaction",
-                    "monthly-income", "monthly-rate", "num-companies-worked", "percent-salary-hike", "performance-rating",
-                    "relationship-satisfaction", "performance-rating", "relationship-satisfaction", "standard-hours", "stock-option-level",
-                    "total-working-years", "training-times-last-year", "work-life-balance", "years-at-company", "years-in-current-role",
-                    "years-since-last-promotion", "years-with-curr-manager"))
-                .Append(ml.BinaryClassification.Trainers.LogisticRegression());
-            */
-
-            //  .Append(ml.BinaryClassification.Trainers.LinearSupportVectorMachines());
-
-            var model = pipeline.Fit(split.trainSet);
-
-            // Extract the model from the pipeline
+            var model = fullLearningPipeline.Fit(categorizedData);
             var linearPredictor = model.LastTransformer;
 
             // Linear models for binary classification are wrapped by a calibrator as a generic predictor
@@ -130,7 +107,7 @@ namespace edaAttrition
             var weights = PfiHelper.GetLinearModelWeights(linearPredictor.Model.SubPredictor as LinearBinaryModelParameters);
 
             // Compute the permutation metrics using the properly normalized data.
-            var transformedData = model.Transform(split.trainSet);
+            var transformedData = model.Transform(categorizedData);
             var permutationMetrics = ml.BinaryClassification.PermutationFeatureImportance(
                 linearPredictor, transformedData, label: labelColumn, features: "Features", permutationCount: 3);
 
@@ -144,49 +121,9 @@ namespace edaAttrition
             var auc = permutationMetrics.Select(x => x.Auc).ToArray(); // Fetch AUC as an array
             foreach (int i in sortedIndices)
             {
-                Console.WriteLine($"{textNames[i]}\t{weights[i]:0.00}\t{auc[i].Mean:G4}\t{1.96 * auc[i].StandardError:G4}");
+                // Console.WriteLine($"{featureNames[i]}\t{weights[i]:0.00}\t{auc[i].Mean:G4}\t{1.96 * auc[i].StandardError:G4}");
             }
 
-
-            /*
-            var dataWithPrediction = model.Transform(split.testSet);
-
-            var metrics = ml.BinaryClassification.Evaluate(dataWithPrediction);
-
-            Console.WriteLine($"Accuracy: {metrics.Accuracy}");
-            Console.WriteLine($"AUC: {metrics.Auc}");
-            Console.WriteLine($"F1 Score: {metrics.F1Score}");
-
-            Console.WriteLine($"Negative Precision: {metrics.NegativePrecision}");
-            Console.WriteLine($"Negative Recall: {metrics.NegativeRecall}");
-            Console.WriteLine($"Positive Precision: {metrics.PositivePrecision}");
-            Console.WriteLine($"Positive Recall: {metrics.PositiveRecall}");
-
-            // Compute the permutation metrics using the properly normalized data.
-            var permutationMetrics = ml.Regression.PermutationFeatureImportance(
-                model.LastTransformer,
-                model.Transform(split.trainSet),
-                label: "Label",
-                features: "Features",
-                useFeatureWeightFilter: true);
-            */
-
-            /*
-            // Extract the model from the pipeline
-            var weights = new Microsoft.ML.Data.VBuffer<float>();
-
-            var linearPredictor = model.LastTransformer;
-            linearPredictor.Model.GetFeatureWeights(ref weights);
-            
-
-            // Now let's look at which features are most important to the model overall
-            // Get the feature indices sorted by their impact on R-Squared
-            var sortedIndices = permutationMetrics.Select((metrics, index) => new { index, metrics.RSquared })
-                .OrderByDescending(feature => Math.Abs(feature.RSquared.Mean))
-                .Select(feature => feature.index);
-            */
-
-            // Console.WriteLine("Exploratory Data Analysis - Done");
         }
     }
 }
