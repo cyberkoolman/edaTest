@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Microsoft.ML;
+using Microsoft.ML.Core.Data;
 using Microsoft.ML.Data;
 using Microsoft.Data.DataView;
 using Microsoft.ML.Trainers;
@@ -16,6 +17,7 @@ namespace edaAttrition
         {
             var ml = new MLContext();
 
+            // Not including EmployeeCount, Over18, StandardHours
             var reader = ml.Data.CreateTextLoader(
                 columns: new[]
             {
@@ -27,7 +29,7 @@ namespace edaAttrition
                 new TextLoader.Column("DistanceFromHome", DataKind.R4, 5),
                 new TextLoader.Column("Education", DataKind.R4, 6),
                 new TextLoader.Column("EducationField", DataKind.Text, 7),
-                new TextLoader.Column("EmployeeCount", DataKind.R4, 8),
+                // new TextLoader.Column("EmployeeCount", DataKind.R4, 8),
                 new TextLoader.Column("EmployeeNumber", DataKind.R4, 9),
                 new TextLoader.Column("EnvironmentSatisfaction", DataKind.R4, 10),
                 new TextLoader.Column("Gender", DataKind.Text, 11),
@@ -40,12 +42,12 @@ namespace edaAttrition
                 new TextLoader.Column("MonthlyIncome", DataKind.R4, 18),
                 new TextLoader.Column("MonthlyRate", DataKind.R4, 19),
                 new TextLoader.Column("NumCompaniesWorked", DataKind.R4, 20),
-                new TextLoader.Column("Over18", DataKind.Text, 21),
+                // new TextLoader.Column("Over18", DataKind.Text, 21),
                 new TextLoader.Column("OverTime", DataKind.Text, 22),
                 new TextLoader.Column("PercentSalaryHike", DataKind.R4, 23),
                 new TextLoader.Column("PerformanceRating", DataKind.R4, 24),
                 new TextLoader.Column("RelationshipSatisfaction", DataKind.R4, 25),
-                new TextLoader.Column("StandardHours", DataKind.R4, 26),
+                // new TextLoader.Column("StandardHours", DataKind.R4, 26),
                 new TextLoader.Column("StockOptionLevel", DataKind.R4, 27),
                 new TextLoader.Column("TotalWorkingYears", DataKind.R4, 28),
                 new TextLoader.Column("TrainingTimesLastYear", DataKind.R4, 29),
@@ -62,6 +64,7 @@ namespace edaAttrition
             var labelColumn = "Label";
 
             IDataView attritionData = reader.Read("./data/attrition.csv");
+
             var textFields = attritionData.Schema.AsEnumerable()
                 .Select(column => new { column.Name, column.Type })
                 .Where(column => (column.Name != labelColumn) && (column.Type.ToString() == "Text"))
@@ -80,13 +83,19 @@ namespace edaAttrition
                 .Select(column => column.Name)
                 .ToArray();
 
+            // Split to 80/20
             var split = ml.BinaryClassification.TrainTestSplit(attritionData, testFraction: 0.2);
             var trainData = split.trainSet;
             var testData = split.testSet;
 
-            var transPipeline = ml.Transforms.Concatenate("CategoricalFeatures", textNames)
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("CategoricalOneHot", "CategoricalFeatures"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("CategoricalBag", "CategoricalFeatures", OneHotEncodingTransformer.OutputKind.Bag));
+            var transPipeline = ml.Transforms.Categorical.OneHotEncoding("BusinessTravelCat", "BusinessTravel")
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("DepartmentCat", "Department"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("DistanceFromHomeCat", "DistanceFromHome"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("EducationFieldCat", "EducationField"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("GenderCat", "Gender"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("JobRoleCat", "JobRole"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("MaritalStatusCat", "MaritalStatus"))
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("OverTimeCat", "OverTime"));            
 
             // First Transform data to be categorized
             var categorizedData = transPipeline.Fit(trainData).Transform(trainData);
@@ -94,7 +103,7 @@ namespace edaAttrition
             // Regression Analysis Pipeline
             var fullLearningPipeline = transPipeline
                 .Append(ml.Transforms.Concatenate("NumericalFeatures", numericNames))
-                .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "CategoricalBag"))
+                .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "BusinessTravelCat", "DepartmentCat"))
                 .Append(ml.Transforms.Normalize("Features"))
                 .Append(ml.BinaryClassification.Trainers.LogisticRegression(
                         labelColumn: labelColumn, featureColumn: "Features"));
