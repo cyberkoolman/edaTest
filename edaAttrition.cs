@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Core.Data;
@@ -7,6 +8,7 @@ using Microsoft.Data.DataView;
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Learners;
 using Microsoft.ML.Transforms.Categorical;
+using System.Collections.Generic;
 
 namespace edaAttrition
 {
@@ -22,7 +24,7 @@ namespace edaAttrition
                 columns: new[]
             {
                 new TextLoader.Column("Age", DataKind.R4, 0),
-                new TextLoader.Column("Label", DataKind.Bool, 1),
+                new TextLoader.Column("Attrition", DataKind.Bool, 1),
                 new TextLoader.Column("BusinessTravel", DataKind.Text, 2),
                 new TextLoader.Column("DailyRate", DataKind.R4, 3),
                 new TextLoader.Column("Department", DataKind.Text, 4),
@@ -61,7 +63,7 @@ namespace edaAttrition
             hasHeader: true
             );
 
-            var labelColumn = "Label";
+            var labelColumn = "Attrition";
 
             IDataView attritionData = reader.Read("./data/attrition.csv");
 
@@ -83,32 +85,20 @@ namespace edaAttrition
                 .Select(column => column.Name)
                 .ToArray();
 
+            var featureNames = textNames.Concat(numericNames).ToArray();
+
             // Split to 80/20
             var split = ml.BinaryClassification.TrainTestSplit(attritionData, testFraction: 0.2);
             var trainData = split.trainSet;
             var testData = split.testSet;
 
-            var transPipeline = ml.Transforms.Categorical.OneHotEncoding("BusinessTravelCat", "BusinessTravel")
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("DepartmentCat", "Department"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("DistanceFromHomeCat", "DistanceFromHome"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("EducationFieldCat", "EducationField"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("GenderCat", "Gender"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("JobRoleCat", "JobRole"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("MaritalStatusCat", "MaritalStatus"))
-                    .Append(ml.Transforms.Categorical.OneHotEncoding("OverTimeCat", "OverTime"));            
-
-            // First Transform data to be categorized
-            var categorizedData = transPipeline.Fit(trainData).Transform(trainData);
-
-            // Regression Analysis Pipeline
-            var fullLearningPipeline = transPipeline
+            var pipeline = ml.Transforms.Concatenate("Text", textNames)
+                .Append(ml.Transforms.Text.FeaturizeText("TextFeatures", "Text"))
                 .Append(ml.Transforms.Concatenate("NumericalFeatures", numericNames))
-                .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "BusinessTravelCat", "DepartmentCat"))
-                .Append(ml.Transforms.Normalize("Features"))
-                .Append(ml.BinaryClassification.Trainers.LogisticRegression(
-                        labelColumn: labelColumn, featureColumn: "Features"));
+                .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "TextFeatures"))
+                .Append(ml.BinaryClassification.Trainers.LogisticRegression(labelColumn: labelColumn, featureColumn: "Features"));
 
-            var model = fullLearningPipeline.Fit(categorizedData);
+            var model = pipeline.Fit(trainData);
             var linearPredictor = model.LastTransformer;
 
             // Linear models for binary classification are wrapped by a calibrator as a generic predictor
@@ -116,7 +106,7 @@ namespace edaAttrition
             var weights = PfiHelper.GetLinearModelWeights(linearPredictor.Model.SubPredictor as LinearBinaryModelParameters);
 
             // Compute the permutation metrics using the properly normalized data.
-            var transformedData = model.Transform(categorizedData);
+            var transformedData = model.Transform(trainData);
             var permutationMetrics = ml.BinaryClassification.PermutationFeatureImportance(
                 linearPredictor, transformedData, label: labelColumn, features: "Features", permutationCount: 3);
 
@@ -130,7 +120,7 @@ namespace edaAttrition
             var auc = permutationMetrics.Select(x => x.Auc).ToArray(); // Fetch AUC as an array
             foreach (int i in sortedIndices)
             {
-                // Console.WriteLine($"{featureNames[i]}\t{weights[i]:0.00}\t{auc[i].Mean:G4}\t{1.96 * auc[i].StandardError:G4}");
+                Console.WriteLine($"{featureNames[i]}\t{weights[i]:0.00}\t{auc[i].Mean:G4}\t{1.96 * auc[i].StandardError:G4}");
             }
 
         }
