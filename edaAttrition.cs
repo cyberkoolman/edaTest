@@ -96,6 +96,11 @@ namespace edaAttrition
                 .Append(ml.Transforms.Text.FeaturizeText("TextFeatures", "Text"))
                 .Append(ml.Transforms.Concatenate("NumericalFeatures", numericNames))
                 .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "TextFeatures"))
+                // Regression requries normalizatoin
+                .Append(ml.Transforms.Normalize("Features"))
+                // Cache data in memory so that the following trainer will be able to access training examples without
+                // reading them from disk multiple times.
+                .AppendCacheCheckpoint(ml)                
                 .Append(ml.BinaryClassification.Trainers.LogisticRegression(labelColumn: labelColumn, featureColumn: "Features"));
 
             var model = pipeline.Fit(trainData);
