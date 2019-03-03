@@ -99,6 +99,21 @@ namespace edaAttrition
                 .Append(ml.BinaryClassification.Trainers.LogisticRegression(labelColumn: labelColumn, featureColumn: "Features"));
 
             var model = pipeline.Fit(trainData);
+
+            // Score the model
+            var dataWithPredictions = model.Transform(testData);
+            var metrics = ml.BinaryClassification.Evaluate(dataWithPredictions, label:labelColumn);
+
+            Console.WriteLine($"Accuracy: {metrics.Accuracy}");
+            Console.WriteLine($"AUC: {metrics.Auc}");
+            Console.WriteLine($"F1 Score: {metrics.F1Score}");
+
+            Console.WriteLine($"Negative Precision: {metrics.NegativePrecision}");
+            Console.WriteLine($"Negative Recall: {metrics.NegativeRecall}");
+            Console.WriteLine($"Positive Precision: {metrics.PositivePrecision}");
+            Console.WriteLine($"Positive Recall: {metrics.PositiveRecall}");
+
+            // Permutation Feature Importance
             var linearPredictor = model.LastTransformer;
 
             // Linear models for binary classification are wrapped by a calibrator as a generic predictor
@@ -112,7 +127,7 @@ namespace edaAttrition
 
             // Now let's look at which features are most important to the model overall
             // Get the feature indices sorted by their impact on AUC
-            var sortedIndices = permutationMetrics.Select((metrics, index) => new { index, metrics.Auc })
+            var sortedIndices = permutationMetrics.Select((pfimetrics, index) => new { index, pfimetrics.Auc })
                 .OrderByDescending(feature => Math.Abs(feature.Auc.Mean))
                 .Select(feature => feature.index);
 
