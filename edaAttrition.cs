@@ -92,7 +92,10 @@ namespace edaAttrition
             var trainData = split.trainSet;
             var testData = split.testSet;
 
-            //OneHotEncoding sample
+            // PermutationFeatureImportance on Categorical Features dataset #2597
+            // and use OneHotEncoding
+            // https://github.com/dotnet/machinelearning/issues/2597
+            //
             var pipeline = ml.Transforms.Concatenate("Text", textNames)
                     .Append(ml.Transforms.Categorical.OneHotEncoding("CategoricalBag", 
                         "Text", OneHotEncodingTransformer.OutputKind.Bag));
