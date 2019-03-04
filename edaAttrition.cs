@@ -92,6 +92,62 @@ namespace edaAttrition
             var trainData = split.trainSet;
             var testData = split.testSet;
 
+            //OneHotEncoding sample
+            var pipeline = ml.Transforms.Concatenate("Text", textNames)
+                    .Append(ml.Transforms.Categorical.OneHotEncoding("CategoricalBag", 
+                        "Text", OneHotEncodingTransformer.OutputKind.Bag));
+            
+            // Let's train our pipeline, and then apply it to the same data.
+            var transformedData = pipeline.Fit(trainData).Transform(trainData);
+
+            var fullLearningPipeline = pipeline
+                    .Append(ml.Transforms.Concatenate("NumericalFeatures", numericNames))
+                    // Concatenate two of the categorical pipelines, and the numeric features.
+                    .Append(ml.Transforms.Concatenate("Features", "NumericalFeatures", "CategoricalBag"))
+                    // Now we're ready to train. We chose our FastTree trainer for this classification task.
+                    .Append(ml.BinaryClassification.Trainers.LogisticRegression(
+                        labelColumn: labelColumn, featureColumn: "Features"));
+
+            // Train the model.
+            var model = fullLearningPipeline.Fit(transformedData);
+
+            var linearPredictor = model.LastTransformer;
+
+            var transformedDataOut = model.Transform(transformedData);
+
+            //Permutation Accuracy metrics
+            var permutationMetrics = ml.BinaryClassification.PermutationFeatureImportance(
+                linearPredictor, transformedDataOut, label: labelColumn, features: "Features", permutationCount: 3);
+
+            // Get Slot information
+            VBuffer<ReadOnlyMemory<char>> slotNames = new VBuffer<ReadOnlyMemory<char>>();
+            transformedDataOut.Schema["Features"].Metadata.GetValue(MetadataUtils.Kinds.SlotNames, ref slotNames);
+            var slotVaues = slotNames.GetValues();
+            var slotIndices = slotNames.GetIndices();
+            var featurePFINames = slotVaues.ToArray();
+
+            var sortedIndices = permutationMetrics.Select((pfimetrics, index) => new { index, pfimetrics.Auc })
+                .OrderByDescending(feature => Math.Abs(feature.Auc.Mean))
+                .Select(feature => feature.index);
+
+            Console.WriteLine("Feature\t\tChange in AUC\t95% Confidence in the Mean Change in AUC");
+            var auc = permutationMetrics.Select(x => x.Auc).ToArray(); // Fetch AUC as an array
+            foreach (int i in sortedIndices)
+            {
+                Console.WriteLine($"{featurePFINames[i]}\t\t{auc[i].Mean:G4}\t{1.96 * auc[i].StandardError:G4}");
+            }
+
+            /*
+            VBuffer<ReadOnlyMemory<char>> catSlotNames = new VBuffer<ReadOnlyMemory<char>>();
+            transformedDataOut.Schema["CategoricalBag"].Metadata.GetValue(MetadataUtils.Kinds.SlotNames, ref catSlotNames);
+            var catSlots = catSlotNames.GetValues();
+
+            VBuffer<ReadOnlyMemory<char>> numSlotNames = new VBuffer<ReadOnlyMemory<char>>();
+            transformedDataOut.Schema["NumericalFeatures"].Metadata.GetValue(MetadataUtils.Kinds.SlotNames, ref numSlotNames);
+            var numSlots = numSlotNames.GetValues();
+            */
+
+            /*
             var pipeline = ml.Transforms.Concatenate("Text", textNames)
                 .Append(ml.Transforms.Text.FeaturizeText("TextFeatures", "Text"))
                 .Append(ml.Transforms.Concatenate("NumericalFeatures", numericNames))
@@ -142,7 +198,7 @@ namespace edaAttrition
             {
                 Console.WriteLine($"{featureNames[i]}\t{weights[i]:0.00}\t{auc[i].Mean:G4}\t{1.96 * auc[i].StandardError:G4}");
             }
-
+             */
         }
     }
 }
